@@ -288,12 +288,27 @@ class InteractiveSession:
         # Simple implementation - in real world would use NLP
         words = query.split()
 
-        # Look for patterns like "host server01" or "on server01"
+        # Generic nouns that may sit between the keyword and the actual
+        # hostname, e.g. "services for server pfc1001" or "on the host db01"
+        skip_words = {
+            "the", "a", "an",
+            "host", "server", "machine", "node", "system",
+        }
+
+        # Look for patterns like "host server01", "on server01",
+        # "for server pfc1001"
         for i, word in enumerate(words):
-            if word.lower() in ["host", "on", "for"] and i + 1 < len(words):
-                potential_host = words[i + 1].rstrip(".,!?")
-                if not potential_host.lower() in ["the", "a", "an"]:
-                    return potential_host
+            if word.lower() in ["host", "on", "for", "server"] and i + 1 < len(words):
+                j = i + 1
+                while (
+                    j < len(words)
+                    and words[j].rstrip(".,!?").lower() in skip_words
+                ):
+                    j += 1
+                if j < len(words):
+                    potential_host = words[j].rstrip(".,!?")
+                    if potential_host:
+                        return potential_host
 
         # Look for words that look like hostnames
         for word in words:
@@ -601,6 +616,39 @@ class InteractiveSession:
         click.echo(prompt[:500] + "..." if len(prompt) > 500 else prompt)
 
     def show_help(self):
-        """Show interactive mode help."""
-        help_text = self.help_system.show_help()
+        """Show interactive mode help.
+
+        The text below documents exactly what this MCP session supports:
+        the structured commands handled by handle_structured_command() and
+        the keyword patterns recognized by _analyze_query_intent(). This is
+        keyword matching, not an LLM -- when in doubt, use the unambiguous
+        structured forms.
+        """
+        help_text = """Checkmk Interactive Mode (MCP) - Commands
+
+Structured commands (unambiguous, always work):
+  hosts list                          List all hosts
+  hosts show <host>                   Show details for a host
+  services list [<host>]              List services (all, or for one host)
+  services acknowledge <host> <svc>   Acknowledge a service problem
+  status dashboard                    Show health dashboard
+  status problems                     Show current problems
+
+Natural language (keyword matching, not an LLM):
+  list all hosts                      Hosts, optional: ... matching <pattern>
+  show host <host>                    Host details
+  list services on <host>             Services; add critical/warning/ok to filter
+  show problems [on <host>]           Problems, "critical problems" for critical only
+  analyze <host>                      Host health analysis
+  acknowledge <svc> on <host>         Or: acknowledge <host>/<svc>
+  downtime <svc> on <host>            Optional duration, e.g. "for 4 hours"
+
+  Host names are detected after the words "on", "for", "host" or "server"
+  (e.g. "show services for server pfc1001"). If a query is misparsed, use
+  the structured form instead.
+
+Other:
+  help, ?                             Show this help
+  exit, quit, bye                     Leave interactive mode (also Ctrl+D)
+"""
         click.echo(self.formatter.format_help(help_text))
