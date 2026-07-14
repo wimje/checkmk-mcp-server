@@ -157,12 +157,12 @@ In Checkmk Web UI:
 # Test your configuration
 python -c "
 from checkmk_mcp_server.config import load_config
-from checkmk_mcp_server.api_client import CheckmkAPIClient
+from checkmk_mcp_server.api_client import CheckmkClient
 
 config = load_config('config.yaml')
-client = CheckmkAPIClient(config)
-result = client.get_version()
-print(f'Connected to Checkmk {result.get(\"version\", \"unknown\")}')
+client = CheckmkClient(config.checkmk)
+result = client.get_version_info()
+print(f'Connected to Checkmk {result.get(\"versions\", {}).get(\"checkmk\", \"unknown\")}')
 "
 ```
 
@@ -209,12 +209,12 @@ Download and install Claude Desktop from Anthropic's website.
     "checkmk": {
       "command": "/full/path/to/checkmk_mcp_server/venv/bin/python",
       "args": [
-        "/full/path/to/checkmk_llm_agent/mcp_checkmk_server.py",
+        "/full/path/to/checkmk_mcp_server/mcp_checkmk_server.py",
         "--config",
-        "/full/path/to/checkmk_llm_agent/config.yaml"
+        "/full/path/to/checkmk_mcp_server/config.yaml"
       ],
       "env": {
-        "PYTHONPATH": "/full/path/to/checkmk_llm_agent"
+        "PYTHONPATH": "/full/path/to/checkmk_mcp_server"
       }
     }
   }
@@ -255,9 +255,9 @@ You should see Claude respond with information about the 37 available monitoring
       "name": "checkmk",
       "command": "python",
       "args": [
-        "/full/path/to/checkmk_llm_agent/mcp_checkmk_server.py",
+        "/full/path/to/checkmk_mcp_server/mcp_checkmk_server.py",
         "--config",
-        "/full/path/to/checkmk_llm_agent/config.yaml"
+        "/full/path/to/checkmk_mcp_server/config.yaml"
       ]
     }
   ]

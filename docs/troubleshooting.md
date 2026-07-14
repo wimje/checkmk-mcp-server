@@ -586,9 +586,34 @@ lsof | grep python | wc -l
 
 **Solution**: Ensure you're in the correct directory and virtual environment is activated:
 ```bash
-cd checkmk_llm_agent
+cd checkmk_mcp_server
 source venv/bin/activate
 export PYTHONPATH=$PWD:$PYTHONPATH
+```
+
+### "NameError: name 'ExceptionGroup' is not defined"
+
+Seen when starting `mcp_checkmk_server.py` on Python 3.10 or older with a version of the code before 2026-07-14. `ExceptionGroup` is a builtin only in Python 3.11+.
+
+**Solution**: Update to the current code, which includes a compatibility shim using the `exceptiongroup` backport. Alternatively, run with Python 3.11+.
+
+### "NameError: name 'MCPCLIContext' is not defined"
+
+Seen when starting `checkmk_cli_mcp.py` with a version of the code before 2026-07-14 — a type annotation referenced a class before its definition.
+
+**Solution**: Update to the current code (fixed via `from __future__ import annotations` in `checkmk_mcp_server/cli_mcp.py`).
+
+### "cannot import name 'CheckmkAPIClient'"
+
+The API client class is named `CheckmkClient`, not `CheckmkAPIClient`, and takes the `checkmk` section of the config:
+
+```python
+from checkmk_mcp_server.config import load_config
+from checkmk_mcp_server.api_client import CheckmkClient
+
+config = load_config('config.yaml')
+client = CheckmkClient(config.checkmk)
+client.test_connection()  # True if reachable
 ```
 
 ### "yaml.scanner.ScannerError"

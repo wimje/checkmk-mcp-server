@@ -27,7 +27,13 @@ The project is a **FULLY OPERATIONAL** Checkmk MCP Server implementation with:
 
 ## Current Focus
 
-**Recently Completed - MCP Prompt Optimization Phase 1 and Python Type Fixes** (2025-08-23):
+**Recently Completed - Python 3.10 Compatibility and Startup Fixes** (2026-07-14):
+- **ExceptionGroup Compatibility Shim**: Fixed `NameError: name 'ExceptionGroup' is not defined` in `mcp_checkmk_server.py` on Python < 3.11 by importing from the `exceptiongroup` backport with stub-class fallback
+- **Clean Terminal Exit**: Replaced `sys.exit(0)` with `return` in the async `main()` manual-run guard, eliminating the SystemExit traceback when running the server in a terminal
+- **CLI MCP Import Fix**: Fixed `NameError: name 'MCPCLIContext' is not defined` in `checkmk_mcp_server/cli_mcp.py` (forward reference in annotations) via `from __future__ import annotations`
+- **Documentation Corrections**: Fixed connection-test snippet in `docs/getting-started.md` (correct `CheckmkClient(config.checkmk)` / `get_version_info()` usage), replaced stale `checkmk_llm_agent` paths, and added new entries to `docs/troubleshooting.md`
+
+**Previously Completed - MCP Prompt Optimization Phase 1 and Python Type Fixes** (2025-08-23):
 - **53% Reduction in Tool Selection Issues**: Achieved measurable improvement reducing from 71 to 33 potential confusion points across all 37 MCP tools
 - **Enhanced Tool Guidance**: Added comprehensive "When to Use" sections for all tools with clear disambiguation rules and workflow context
 - **Python Type Safety Enhancement**: Fixed 41 Python type annotation issues in async_api_client.py using modern Optional, Union, and proper generic types

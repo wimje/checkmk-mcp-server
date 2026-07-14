@@ -32,6 +32,20 @@ sys.path.insert(0, str(project_root))
 from checkmk_mcp_server.config import load_config
 from checkmk_mcp_server.mcp_server import CheckmkMCPServer
 
+# ExceptionGroup/BaseExceptionGroup are builtins only in Python 3.11+.
+# On older versions, use the exceptiongroup backport (a dependency of anyio),
+# falling back to stub classes so `except (ExceptionGroup, ...)` stays valid.
+if sys.version_info < (3, 11):
+    try:
+        from exceptiongroup import ExceptionGroup, BaseExceptionGroup
+    except ImportError:
+
+        class BaseExceptionGroup(BaseException):  # type: ignore[no-redef]
+            pass
+
+        class ExceptionGroup(BaseExceptionGroup, Exception):  # type: ignore[no-redef]
+            pass
+
 
 def _is_client_disconnect_error(exception: Exception) -> bool:
     """Check if an exception represents a client disconnect."""
@@ -289,7 +303,7 @@ async def main():
         print("  docs/getting-started.md")
         print()
         print("To force MCP server mode anyway, use: --force-mcp")
-        sys.exit(0)
+        return
     
     # Setup logging
     setup_logging(args.log_level)

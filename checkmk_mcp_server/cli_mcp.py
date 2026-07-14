@@ -1,5 +1,7 @@
 """CLI implementation using MCP client backend."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
