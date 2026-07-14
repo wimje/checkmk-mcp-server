@@ -100,7 +100,7 @@ class InteractiveSession:
         # direct CLI and has a different interface -- parse_command() /
         # CommandIntent -- so it isn't used here.)
         tokens = command.split()
-        if tokens and tokens[0].lower() in ("hosts", "services", "status"):
+        if tokens and tokens[0].lower() in ("hosts", "services", "status", "stats"):
             parsed = {
                 "type": "structured",
                 "command": tokens[0].lower(),
@@ -199,6 +199,16 @@ class InteractiveSession:
                     await self._show_health_dashboard()
                 elif args and args[0] == "problems":
                     await self._show_problems()
+                else:
+                    click.echo(
+                        self.formatter.format_error(
+                            "Usage: status dashboard | status problems"
+                        )
+                    )
+
+            elif command == "stats":
+                # Statistics overview (host/service state distribution)
+                await self._show_health_dashboard()
 
             else:
                 click.echo(self.formatter.format_error(f"Unknown command: {command}"))
@@ -633,19 +643,27 @@ Structured commands (unambiguous, always work):
   services acknowledge <host> <svc>   Acknowledge a service problem
   status dashboard                    Show health dashboard
   status problems                     Show current problems
+  stats                               Statistics overview (host/service states)
 
 Natural language (keyword matching, not an LLM):
   list all hosts                      Hosts, optional: ... matching <pattern>
   show host <host>                    Host details
-  list services on <host>             Services; add critical/warning/ok to filter
+  list services on <host>             Services; add critical/warning/ok/unknown
+                                      to filter by state
   show problems [on <host>]           Problems, "critical problems" for critical only
-  analyze <host>                      Host health analysis
+  health / dashboard / overview       Health dashboard
+  analyze <host>                      Host health analysis (also: "how is <host>")
   acknowledge <svc> on <host>         Or: acknowledge <host>/<svc>
   downtime <svc> on <host>            Optional duration, e.g. "for 4 hours"
+                                      (default 2 hours)
 
   Host names are detected after the words "on", "for", "host" or "server"
   (e.g. "show services for server pfc1001"). If a query is misparsed, use
   the structured form instead.
+
+  Anything that matches no pattern generates an AI analysis prompt preview
+  (the prompt is shown, not sent to an LLM -- see docs/architecture.md,
+  "Where the LLM Lives").
 
 Other:
   help, ?                             Show this help

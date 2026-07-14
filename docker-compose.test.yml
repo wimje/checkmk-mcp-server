@@ -1,0 +1,48 @@
+# Disposable Checkmk sites for integration testing.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   # wait ~1-2 min for site initialization, then:
+#   python scripts/seed_test_site.py --url http://localhost:8080 --site cmk
+#   python scripts/seed_test_site.py --url http://localhost:8081 --site cmk
+#
+# Web UI: http://localhost:8080/cmk/  (user: cmkadmin, password: test123)
+# The 2.2 site on :8081 exercises the version-compatibility code paths
+# (GET-only service listings, minimum version check).
+
+services:
+  cmk24:
+    image: checkmk/check-mk-raw:2.4.0-latest
+    container_name: cmk-test-24
+    ports:
+      - "8080:5000"
+    environment:
+      CMK_PASSWORD: "test123"
+      CMK_SITE_ID: "cmk"
+    tmpfs:
+      # Only the site's tmp dir (official recommendation) -- mounting all of
+      # /opt/omd/sites breaks site init (tmpfs is noexec)
+      - /opt/omd/sites/cmk/tmp:uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/cmk/check_mk/api/1.0/version", "-H", "Authorization: Bearer cmkadmin test123", "-H", "Accept: application/json"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  cmk22:
+    image: checkmk/check-mk-raw:2.2.0-latest
+    container_name: cmk-test-22
+    ports:
+      - "8081:5000"
+    environment:
+      CMK_PASSWORD: "test123"
+      CMK_SITE_ID: "cmk"
+    tmpfs:
+      # Only the site's tmp dir (official recommendation) -- mounting all of
+      # /opt/omd/sites breaks site init (tmpfs is noexec)
+      - /opt/omd/sites/cmk/tmp:uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/cmk/check_mk/api/1.0/version", "-H", "Authorization: Bearer cmkadmin test123", "-H", "Accept: application/json"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
