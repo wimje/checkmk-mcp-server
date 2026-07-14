@@ -27,7 +27,15 @@ The project is a **FULLY OPERATIONAL** Checkmk MCP Server implementation with:
 
 ## Current Focus
 
-**Recently Completed - MCP CLI End-to-End Repair** (2026-07-14):
+**Recently Completed - Version Compatibility, Checkmk 2.2 Support, and Integration Test Infrastructure** (2026-07-14):
+- **Version Compatibility Checks**: `CheckmkClient.check_version_compatibility()` verifies Checkmk version (minimum 2.2.0) and REST API revision (majors 0/1); MCP server startup and direct CLI refuse cleanly (no traceback) on unsupported servers; `get_system_info` reports `version_supported`/`api_revision`
+- **Checkmk 2.2 Support**: Audited all client endpoints against the bundled 2.2 spec (`docs/checkmk-rest-openapi-2.2.yaml`); only incompatibility was the 2.4-only POST variants of the service listing endpoints — new `_request_service_collection()` converts to GET with query params on servers < 2.4 (server version cached per client)
+- **Integration Test Infrastructure**: `docker-compose.test.yml` (disposable 2.4 + 2.2 raw-edition sites), idempotent `scripts/seed_test_site.py`, `tests/integration/` suite (version compat, host listing + monitoring fallback, service listing, downtime/ack, MCP end-to-end over stdio) with localhost-only safety rail; verified 15/15 passing against both 2.4.0p34 and 2.2.0p47; see `docs/testing.md`
+- **pytest Config Fix**: `pytest.ini` used `[tool:pytest]` (only valid in setup.cfg), silently disabling ALL pytest configuration including `asyncio_mode = auto`; corrected to `[pytest]`
+- **Interactive Mode Polish**: Real `stats` command (health dashboard), complete help text documenting all structured commands and keyword patterns, hostname extraction skips filler nouns ("services for server pfc1001")
+- **Documentation**: `docs/testing.md` testing guide; "Where the LLM Lives" section in architecture.md clarifying that the `llm:` config is only used by the direct CLI (MCP path: the AI client is the LLM; MCP CLI: keyword matching only)
+
+**Previously Completed - MCP CLI End-to-End Repair** (2026-07-14):
 - **Root Cause of "macOS stdio timeout" Found**: `ClientSession` was created but never entered (`__aenter__`), so its background receive loop never started and `initialize()` always timed out — the 2025-08-22 timeout/fallback machinery was working around this bug. Session is now properly entered/exited; connections initialize on the fast path
 - **Connection Lifecycle Fix**: Each CLI subcommand runs in its own `asyncio.run()` loop, so `async_command` now opens a fresh MCP connection per command; `__aenter__` is no longer wrapped in `asyncio.wait_for` (anyio cancel scopes must be entered/exited in the same task); partial connections are cleaned up in-task, eliminating "Attempted to exit cancel scope in a different task" tracebacks at shutdown
 - **Fallback Path Fix**: After falling back to the direct CLI, the process now exits instead of letting click invoke the MCP subcommand with an uninitialized context ("Error: CLI context not initialized")
