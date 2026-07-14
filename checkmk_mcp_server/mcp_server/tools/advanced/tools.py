@@ -54,28 +54,30 @@ class AdvancedTools:
 
         async def get_system_info():
             try:
-                # Use the direct async client method for this simple operation
-                if hasattr(self.server, 'checkmk_client'):
-                    version_info = await self.server.checkmk_client.get_version_info()
-
-                    # Extract key information
-                    versions = version_info.get("versions", {})
-                    site_info = version_info.get("site", "unknown")
-                    edition = version_info.get("edition", "unknown")
-
-                    return {
-                        "success": True,
-                        "checkmk_version": versions.get("checkmk", "unknown"),
-                        "edition": edition,
-                        "site": site_info,
-                        "python_version": versions.get("python", "unknown"),
-                        "apache_version": versions.get("apache", "unknown"),
-                    }
-                else:
+                # The async API client is registered in the service container
+                # (the old server.checkmk_client attribute no longer exists).
+                client = self._get_service('async_client')
+                if client is None:
                     return {
                         "success": False,
                         "error": "Checkmk client not available"
                     }
+
+                version_info = await client.get_version_info()
+
+                # Extract key information
+                versions = version_info.get("versions", {})
+                site_info = version_info.get("site", "unknown")
+                edition = version_info.get("edition", "unknown")
+
+                return {
+                    "success": True,
+                    "checkmk_version": versions.get("checkmk", "unknown"),
+                    "edition": edition,
+                    "site": site_info,
+                    "python_version": versions.get("python", "unknown"),
+                    "apache_version": versions.get("apache", "unknown"),
+                }
             except Exception as e:
                 logger.exception("Error getting system info")
                 return {"success": False, "error": sanitize_error(e)}

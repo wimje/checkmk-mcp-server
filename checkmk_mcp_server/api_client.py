@@ -381,13 +381,69 @@ class CheckmkClient:
         if effective_attributes:
             params["effective_attributes"] = "true"
 
-        response = self._make_request(
-            "GET", "/domain-types/host_config/collections/all", params=params
-        )
+        try:
+            response = self._make_request(
+                "GET", "/domain-types/host_config/collections/all", params=params
+            )
+            hosts = response.get("value", [])
+        except CheckmkAPIError as e:
+            # Monitoring-only users get 403 from the Setup/config API
+            if e.status_code == 403:
+                self.logger.debug(
+                    "No Setup access to host_config endpoint, "
+                    "falling back to monitoring endpoint"
+                )
+                hosts = []
+            else:
+                raise
 
-        # Extract host data from response
-        hosts = response.get("value", [])
+        # Fallback: the config endpoint requires Setup (WATO) read access and
+        # returns nothing for monitoring-only automation users. The monitoring
+        # endpoint only needs monitoring visibility (like service queries).
+        if not hosts:
+            hosts = self._list_hosts_via_monitoring()
+
         self.logger.info(f"Retrieved {len(hosts)} hosts")
+        return hosts
+
+    def _list_hosts_via_monitoring(self) -> List[Dict[str, Any]]:
+        """List hosts via the monitoring (Livestatus) endpoint.
+
+        Used as a fallback when the host_config (Setup) endpoint is empty or
+        forbidden. Results are mapped to the host_config response shape so
+        callers can treat both uniformly; folder is unknown here ("/").
+        """
+        try:
+            response = self._make_request(
+                "GET",
+                "/domain-types/host/collections/all",
+                params={"columns": ["name", "address"]},
+            )
+        except CheckmkAPIError as e:
+            self.logger.debug(f"Monitoring endpoint host listing failed: {e}")
+            return []
+
+        hosts: List[Dict[str, Any]] = []
+        for entry in response.get("value", []):
+            extensions = entry.get("extensions", {})
+            name = extensions.get("name") or entry.get("id", "")
+            if not name:
+                continue
+            hosts.append(
+                {
+                    "id": name,
+                    "extensions": {
+                        "folder": "/",
+                        "attributes": {"ipaddress": extensions.get("address")},
+                    },
+                }
+            )
+
+        if hosts:
+            self.logger.info(
+                f"Retrieved {len(hosts)} hosts via monitoring endpoint "
+                "(host_config endpoint empty or not permitted)"
+            )
         return hosts
 
     def get_host(

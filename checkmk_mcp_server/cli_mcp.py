@@ -102,23 +102,41 @@ class MCPCLIContext:
     """Context object for MCP-based CLI commands."""
 
     def __init__(
-        self, 
-        config: AppConfig, 
-        mcp_client: CheckmkMCPClient, 
-        formatter: CLIFormatter
+        self,
+        config: AppConfig,
+        mcp_client: CheckmkMCPClient,
+        formatter: CLIFormatter,
+        config_file: Optional[str] = None,
     ) -> None:
         self.config = config
         self.mcp_client = mcp_client
         self.formatter = formatter
+        self.config_file = config_file
 
 
 def async_command(f: Callable[..., Awaitable[Any]]) -> Callable[..., Any]:
-    """Decorator to run async commands in the event loop."""
-    
+    """Decorator to run async commands in the event loop.
+
+    Each command runs in its own asyncio.run() event loop, so an MCP
+    connection opened in the group callback's loop is unusable here (its
+    stdio reader/writer tasks died with that loop). If the command receives
+    an MCPCLIContext, open a fresh connection for the lifetime of the
+    command in this loop.
+    """
+
     @wraps(f)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return asyncio.run(f(*args, **kwargs))
-    
+        ctx_obj = next((a for a in args if isinstance(a, MCPCLIContext)), None)
+
+        async def runner() -> Any:
+            if ctx_obj is None:
+                return await f(*args, **kwargs)
+            async with create_mcp_client(ctx_obj.config, ctx_obj.config_file) as client:
+                ctx_obj.mcp_client = client
+                return await f(*args, **kwargs)
+
+        return asyncio.run(runner())
+
     return wrapper
 
 
@@ -175,16 +193,24 @@ async def cli(
             original_args.remove('--force-direct')
         sys.argv = ['checkmk_mcp_server.cli'] + original_args
         direct_cli.main(standalone_mode=False)
-        return
+        # The direct CLI handled the full command line (including any
+        # subcommand); exit so click doesn't also invoke the MCP subcommand.
+        sys.exit(0)
 
-    # Try MCP client connection with timeout, fallback to direct CLI if stdio fails
+    # Try MCP client connection, fallback to direct CLI if stdio fails.
+    # NOTE: __aenter__ must NOT be wrapped in asyncio.wait_for() -- that runs
+    # it in a child task, and the anyio cancel scopes inside stdio_client can
+    # then never be exited cleanly from this task. connect() has its own
+    # internal timeouts.
     try:
-        # Set a reasonable timeout for MCP connection
         mcp_client_context = create_mcp_client(app_config, config_file_path)
-        mcp_client = await asyncio.wait_for(mcp_client_context.__aenter__(), timeout=15.0)
+        mcp_client = await mcp_client_context.__aenter__()
         try:
-            # Store in context for subcommands
-            ctx.obj = MCPCLIContext(app_config, mcp_client, formatter)
+            # Store in context for subcommands (each reconnects in its own
+            # event loop via async_command; this connection is a probe)
+            ctx.obj = MCPCLIContext(
+                app_config, mcp_client, formatter, config_file=config_file_path
+            )
 
             # If this is not a subcommand, just connect and exit
             if ctx.invoked_subcommand is None:
@@ -216,7 +242,10 @@ async def cli(
             logger.error(f"Both MCP and direct CLI failed: {direct_cli_error}")
             click.echo(formatter.format_error(f"CLI initialization failed: {direct_cli_error}"))
             sys.exit(1)
-        return
+        # The direct CLI handled the full command line (including any
+        # subcommand); exit so click doesn't also invoke the MCP subcommand
+        # with an uninitialized context ("Error: CLI context not initialized").
+        sys.exit(0)
     except Exception as e:
         logger.error(f"Unexpected error during CLI initialization: {e}")
         click.echo(formatter.format_error(f"Unexpected error: {e}"))

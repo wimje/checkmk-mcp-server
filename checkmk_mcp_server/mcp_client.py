@@ -75,11 +75,12 @@ class CheckmkMCPClient:
                 await self._stdio_context.__aenter__()
             )
 
-            # Give the server process more time to fully start on macOS
-            await asyncio.sleep(2.0)
-
-            # Try to establish the session with better error handling for macOS
+            # Create the session and enter its context. Entering the session
+            # (__aenter__) starts the background receive loop -- without it
+            # the session never reads responses from the server and
+            # initialize() times out.
             self.session = ClientSession(self._read_stream, self._write_stream)
+            await self.session.__aenter__()
 
             # Use a more aggressive approach for macOS - try immediate initialization
             # without timeout to see if the issue is timeout-related
@@ -106,15 +107,19 @@ class CheckmkMCPClient:
                     await asyncio.wait_for(self.session.initialize(), timeout=60.0)
                 
                 logger.info("Successfully connected to MCP server")
-                logger.info(f"Server info: {self.session.server_info}")
                 
                 # Verify connection with a simple ping test
                 try:
+                    # Tool responses aren't guaranteed to carry a "success"
+                    # key; only treat an explicit error as a failed ping.
                     ping_result = await self.call_tool("get_system_info", {})
-                    if ping_result.get("success"):
-                        logger.info("MCP connection verified with system info ping")
+                    if ping_result.get("error"):
+                        logger.warning(
+                            f"MCP connection established but ping test failed: "
+                            f"{ping_result['error']}"
+                        )
                     else:
-                        logger.warning("MCP connection established but ping test failed")
+                        logger.info("MCP connection verified with system info ping")
                 except Exception as ping_error:
                     logger.warning(f"MCP connection ping test failed: {ping_error}")
                 
@@ -128,26 +133,43 @@ class CheckmkMCPClient:
                 else:
                     raise RuntimeError(f"MCP session initialization failed: {e}")
 
-        except Exception as e:
+        except BaseException as e:
+            # Clean up the partially-opened stdio context *in this task* --
+            # anyio cancel scopes must be exited in the task that entered them.
+            # Leaving it open leaks an async generator that asyncio closes at
+            # loop shutdown, producing "Attempted to exit cancel scope in a
+            # different task" tracebacks.
+            await self._cleanup_connection_state()
+            if isinstance(e, asyncio.CancelledError):
+                raise
             logger.exception("Failed to connect to MCP server")
             raise RuntimeError(f"MCP connection failed: {str(e)}")
 
-    async def disconnect(self) -> None:
-        """Disconnect from the MCP server."""
-        if self.session:
+    async def _cleanup_connection_state(self) -> None:
+        """Close the session and stdio context (if open) and reset state."""
+        if self.session is not None:
             try:
-                await self.session.close()
+                await self.session.__aexit__(None, None, None)
+            except BaseException as cleanup_error:
+                logger.debug(f"Error closing MCP session: {cleanup_error}")
+            finally:
                 self.session = None
-                logger.info("Disconnected from MCP server")
-            except Exception as e:
-                logger.warning(f"Error during disconnect: {e}")
-
-        if self._stdio_context:
+        if self._stdio_context is not None:
             try:
                 await self._stdio_context.__aexit__(None, None, None)
+            except BaseException as cleanup_error:
+                logger.debug(f"Error closing stdio context: {cleanup_error}")
+            finally:
                 self._stdio_context = None
-            except Exception as e:
-                logger.warning(f"Error closing stdio context: {e}")
+                self._read_stream = None
+                self._write_stream = None
+
+    async def disconnect(self) -> None:
+        """Disconnect from the MCP server."""
+        was_connected = self.session is not None
+        await self._cleanup_connection_state()
+        if was_connected:
+            logger.info("Disconnected from MCP server")
 
         if self._server_process:
             try:
@@ -169,6 +191,11 @@ class CheckmkMCPClient:
         """Call an MCP tool and return the result."""
         self._ensure_connected()
 
+        # Omit None values: unset optional parameters must be absent, not
+        # null, or the server's input schema validation rejects the call
+        # ("None is not of type 'string'").
+        arguments = {k: v for k, v in arguments.items() if v is not None}
+
         try:
             result = await self.session.call_tool(tool_name, arguments)
 
@@ -179,12 +206,25 @@ class CheckmkMCPClient:
                     # TextContent
                     response_text = result.content[0].text
                     try:
-                        return json.loads(response_text)
+                        data = json.loads(response_text)
                     except json.JSONDecodeError:
                         return {
                             "success": False,
                             "error": f"Invalid JSON response: {response_text}",
                         }
+                    # The server returns a raw CallToolResult-shaped dict (an
+                    # MCP SDK bug workaround), which the SDK serializes again
+                    # as text content. Unwrap to get the actual tool payload.
+                    if (
+                        isinstance(data, dict)
+                        and "isError" in data
+                        and isinstance(data.get("content"), list)
+                    ):
+                        try:
+                            data = json.loads(data["content"][0]["text"])
+                        except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+                            pass
+                    return data
                 else:
                     return {"success": False, "error": "Unexpected content type"}
             else:

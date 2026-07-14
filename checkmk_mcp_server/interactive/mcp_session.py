@@ -45,9 +45,8 @@ class InteractiveSession:
         self, initial_prompt: Optional[str] = None, load_history: bool = True
     ):
         """Run the interactive session."""
-        # Setup readline with history
-        if load_history:
-            self.readline_handler.load_history()
+        # Readline history is already loaded by ReadlineHandler's constructor
+        # (_setup_readline/_load_history); nothing extra to do for load_history.
 
         # Process initial prompt if provided
         if initial_prompt:
@@ -63,7 +62,7 @@ class InteractiveSession:
                     continue
 
                 # Save to history
-                self.readline_handler.add_to_history(user_input)
+                self.readline_handler.add_history(user_input)
 
                 # Process the command
                 should_exit = await self.process_command(user_input.strip())
@@ -95,15 +94,22 @@ class InteractiveSession:
             self.show_help()
             return False
 
-        # Parse the command
-        parsed = self.command_parser.parse(command)
-
-        if parsed["type"] == "natural_language":
-            await self.handle_natural_language(parsed["query"])
-        elif parsed["type"] == "structured":
+        # Classify the command: inputs starting with a known command group
+        # are structured (e.g. "hosts list", "status problems"); everything
+        # else is treated as natural language. (CommandParser belongs to the
+        # direct CLI and has a different interface -- parse_command() /
+        # CommandIntent -- so it isn't used here.)
+        tokens = command.split()
+        if tokens and tokens[0].lower() in ("hosts", "services", "status"):
+            parsed = {
+                "type": "structured",
+                "command": tokens[0].lower(),
+                "args": tokens[1:],
+                "options": {},
+            }
             await self.handle_structured_command(parsed)
         else:
-            click.echo(self.formatter.format_error(f"Unknown command: {command}"))
+            await self.handle_natural_language(command)
 
         return False
 
@@ -596,5 +602,5 @@ class InteractiveSession:
 
     def show_help(self):
         """Show interactive mode help."""
-        help_text = self.help_system.get_interactive_help()
+        help_text = self.help_system.show_help()
         click.echo(self.formatter.format_help(help_text))

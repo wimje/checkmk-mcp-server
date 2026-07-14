@@ -27,7 +27,17 @@ The project is a **FULLY OPERATIONAL** Checkmk MCP Server implementation with:
 
 ## Current Focus
 
-**Recently Completed - Python 3.10 Compatibility and Startup Fixes** (2026-07-14):
+**Recently Completed - MCP CLI End-to-End Repair** (2026-07-14):
+- **Root Cause of "macOS stdio timeout" Found**: `ClientSession` was created but never entered (`__aenter__`), so its background receive loop never started and `initialize()` always timed out — the 2025-08-22 timeout/fallback machinery was working around this bug. Session is now properly entered/exited; connections initialize on the fast path
+- **Connection Lifecycle Fix**: Each CLI subcommand runs in its own `asyncio.run()` loop, so `async_command` now opens a fresh MCP connection per command; `__aenter__` is no longer wrapped in `asyncio.wait_for` (anyio cancel scopes must be entered/exited in the same task); partial connections are cleaned up in-task, eliminating "Attempted to exit cancel scope in a different task" tracebacks at shutdown
+- **Fallback Path Fix**: After falling back to the direct CLI, the process now exits instead of letting click invoke the MCP subcommand with an uninitialized context ("Error: CLI context not initialized")
+- **Tool Call Fixes**: `call_tool` strips `None` arguments (server schema validation rejects nulls) and unwraps the double-serialized CallToolResult-shaped dict the server returns as an SDK bug workaround
+- **CLIFormatter Completed**: Added 12 methods the MCP CLI referenced but never existed (format_header/info/success/warning/prompt/help, host details, acknowledge/downtime/discovery results, problem summary, host analysis)
+- **Interactive Session Fixes**: Local command classification (CommandParser has a different interface), `add_history`/`show_help` method name fixes, prompt no longer doubles "> "
+- **get_system_info Fix**: Tool now gets the API client from the service container (`async_client`) instead of the removed `server.checkmk_client` attribute
+- **Host Listing Fallback**: `list_hosts` falls back to the monitoring endpoint (`/domain-types/host/collections/all`) when the Setup `host_config` endpoint is empty or 403 — monitoring-only automation users now see their hosts
+
+**Previously Completed - Python 3.10 Compatibility and Startup Fixes** (2026-07-14):
 - **ExceptionGroup Compatibility Shim**: Fixed `NameError: name 'ExceptionGroup' is not defined` in `mcp_checkmk_server.py` on Python < 3.11 by importing from the `exceptiongroup` backport with stub-class fallback
 - **Clean Terminal Exit**: Replaced `sys.exit(0)` with `return` in the async `main()` manual-run guard, eliminating the SystemExit traceback when running the server in a terminal
 - **CLI MCP Import Fix**: Fixed `NameError: name 'MCPCLIContext' is not defined` in `checkmk_mcp_server/cli_mcp.py` (forward reference in annotations) via `from __future__ import annotations`

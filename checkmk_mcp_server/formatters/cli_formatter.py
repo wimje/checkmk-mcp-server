@@ -291,6 +291,96 @@ class CLIFormatter(BaseFormatter):
         else:
             return self.ui.format_message(error, MessageType.ERROR)
 
+    def format_info(self, message: str) -> str:
+        """Format informational message."""
+        return self.ui.format_message(message, MessageType.INFO)
+
+    def format_success(self, message: str) -> str:
+        """Format success message."""
+        return self.ui.format_message(message, MessageType.SUCCESS)
+
+    def format_warning(self, message: str) -> str:
+        """Format warning message."""
+        return self.ui.format_message(message, MessageType.WARNING)
+
+    def format_header(self, title: str) -> str:
+        """Format a section header."""
+        line = "─" * max(len(title) + 4, 40)
+        return self.ui.colorize(f"{line}\n  {title}\n{line}", "header")
+
+    def format_prompt(self, prompt: str = "checkmk") -> str:
+        """Format the interactive command prompt.
+
+        UIManager.format_prompt appends its own "> ", so strip any trailing
+        prompt characters from the caller's text to avoid "checkmk> >".
+        """
+        return self.ui.format_prompt(prompt.rstrip().rstrip(">").rstrip())
+
+    def format_help(self, help_text: str) -> str:
+        """Format help text."""
+        return self.ui.format_message(help_text, MessageType.HELP)
+
+    def format_host_details(self, data: Dict[str, Any]) -> str:
+        """Format host details as key/value output."""
+        return self._format_dict("Host Details", data)
+
+    def format_acknowledge_result(self, data: Dict[str, Any]) -> str:
+        """Format the result of a service acknowledgement."""
+        return self._format_dict("Acknowledgement", data)
+
+    def format_downtime_result(self, data: Dict[str, Any]) -> str:
+        """Format the result of a downtime creation."""
+        return self._format_dict("Downtime", data)
+
+    def format_discovery_result(self, data: Dict[str, Any]) -> str:
+        """Format a service discovery result."""
+        return self._format_dict("Service Discovery", data)
+
+    def format_problem_summary(self, data: Dict[str, Any]) -> str:
+        """Format a problem summary."""
+        problems = data.get("problems") if isinstance(data, dict) else None
+        if isinstance(problems, list):
+            if not problems:
+                return self.ui.format_message("No problems found", MessageType.SUCCESS)
+            lines = [self.ui.colorize(f"🚨 {len(problems)} problem(s):", "header")]
+            for problem in problems:
+                if isinstance(problem, dict):
+                    lines.append(self._format_single_service(problem))
+                else:
+                    lines.append(f"  • {problem}")
+            return "\n".join(lines)
+        return self._format_dict("Problem Summary", data)
+
+    def format_host_analysis(self, data: Dict[str, Any]) -> str:
+        """Format a host health analysis."""
+        return self._format_dict("Host Analysis", data)
+
+    def _format_dict(self, title: str, data: Any, indent: int = 0) -> str:
+        """Generic nested key/value renderer for structured results."""
+        pad = "  " * indent
+        if not isinstance(data, dict):
+            return f"{pad}{data}"
+        lines = []
+        if indent == 0:
+            lines.append(self.ui.colorize(f"📋 {title}:", "header"))
+            indent = 1
+            pad = "  "
+        for key, value in data.items():
+            label = str(key).replace("_", " ").title()
+            if isinstance(value, dict):
+                lines.append(f"{pad}{label}:")
+                lines.append(self._format_dict(title, value, indent + 1))
+            elif isinstance(value, list):
+                lines.append(f"{pad}{label}:")
+                for item in value:
+                    if isinstance(item, dict):
+                        lines.append(self._format_dict(title, item, indent + 1))
+                    else:
+                        lines.append(f"{pad}  • {item}")
+            else:
+                lines.append(f"{pad}{label}: {value}")
+        return "\n".join(lines)
+
     def _format_single_host(self, host: Dict[str, Any]) -> str:
         """Format a single host entry."""
         name = host.get("name", "")
