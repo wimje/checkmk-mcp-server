@@ -70,13 +70,32 @@ class AdvancedTools:
                 site_info = version_info.get("site", "unknown")
                 edition = version_info.get("edition", "unknown")
 
+                # Compatibility assessment (no extra API call)
+                from ....api_client import CheckmkClient
+
+                checkmk_version = versions.get("checkmk", "unknown")
+                parsed = CheckmkClient.parse_checkmk_version(checkmk_version)
+                version_supported = (
+                    parsed >= CheckmkClient.MIN_CHECKMK_VERSION
+                    if parsed is not None
+                    else None
+                )
+                api_revision = (version_info.get("rest_api") or {}).get(
+                    "revision", "unknown"
+                )
+
                 return {
                     "success": True,
-                    "checkmk_version": versions.get("checkmk", "unknown"),
+                    "checkmk_version": checkmk_version,
                     "edition": edition,
                     "site": site_info,
                     "python_version": versions.get("python", "unknown"),
                     "apache_version": versions.get("apache", "unknown"),
+                    "api_revision": api_revision,
+                    "version_supported": version_supported,
+                    "minimum_supported_version": ".".join(
+                        str(x) for x in CheckmkClient.MIN_CHECKMK_VERSION
+                    ),
                 }
             except Exception as e:
                 logger.exception("Error getting system info")

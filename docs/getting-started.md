@@ -14,7 +14,9 @@ The Checkmk MCP Server acts as a bridge between AI assistants and your Checkmk m
 - **Memory**: 512MB+ available RAM (scales with infrastructure size)
 
 ### Checkmk Requirements
-- **Version**: Checkmk 2.4.0 or higher
+- **Version**: Checkmk 2.2.0 or higher (2.4 recommended -- the client is
+  developed and tested against the 2.4 REST API; on 2.2/2.3 some endpoints
+  may behave differently)
 - **API Access**: REST API must be enabled
 - **User Account**: Automation user with appropriate monitoring permissions
 

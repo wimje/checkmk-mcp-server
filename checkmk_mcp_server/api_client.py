@@ -1,5 +1,6 @@
 """Checkmk REST API client based on OpenAPI specification."""
 
+import re
 import requests
 from datetime import date
 from typing import Dict, List, Optional, Any, Tuple
@@ -255,6 +256,10 @@ class CheckmkClient:
         self.config = config
         self.base_url = f"{config.server_url}/{config.site}/check_mk/api/1.0"
         self.session = requests.Session()
+
+        # Lazily-populated server version cache (see _get_server_version)
+        self._cached_server_version: Optional[Tuple[int, int, int]] = None
+        self._server_version_checked: bool = False
 
         # Use request ID-aware logger
         from .logging_utils import get_logger_with_request_id
@@ -910,8 +915,8 @@ class CheckmkClient:
         self.logger.info(
             f"CLI DEBUG: Calling /domain-types/service/collections/all with data: {data}"
         )
-        response = self._make_request(
-            "POST", "/domain-types/service/collections/all", json=data
+        response = self._request_service_collection(
+            "/domain-types/service/collections/all", data
         )
         self.logger.info(
             f"CLI DEBUG: Got response with {len(response.get('value', []))} services"
@@ -988,8 +993,8 @@ class CheckmkClient:
         self.logger.info(
             f"CLI DEBUG: Calling /domain-types/service/collections/all (all services) with data: {data}"
         )
-        response = self._make_request(
-            "POST", "/domain-types/service/collections/all", json=data
+        response = self._request_service_collection(
+            "/domain-types/service/collections/all", data
         )
         self.logger.info(
             f"CLI DEBUG: Got response with {len(response.get('value', []))} total services"
@@ -1094,8 +1099,8 @@ class CheckmkClient:
         if columns:
             data["columns"] = columns
 
-        response = self._make_request(
-            "POST", "/domain-types/service/collections/all", json=data
+        response = self._request_service_collection(
+            "/domain-types/service/collections/all", data
         )
 
         # Extract service data from response
@@ -2280,17 +2285,15 @@ class CheckmkClient:
             }
             if host_filter:
                 # Simple host-specific endpoint if host filter provided
-                # Note: Host-specific services endpoint uses POST in 2.4 as well
                 basic_data["host_name"] = host_filter
-                response = self._make_request(
-                    "POST",
+                response = self._request_service_collection(
                     "/objects/host/{}/collections/services".format(host_filter),
-                    json=basic_data,
+                    basic_data,
                 )
             else:
                 # All services endpoint
-                response = self._make_request(
-                    "POST", "/domain-types/service/collections/all", json=basic_data
+                response = self._request_service_collection(
+                    "/domain-types/service/collections/all", basic_data
                 )
 
             all_services = response.get("value", [])
@@ -2336,8 +2339,8 @@ class CheckmkClient:
                 ]
             }
 
-            response = self._make_request(
-                "POST", "/domain-types/service/collections/all", json=data
+            response = self._request_service_collection(
+                "/domain-types/service/collections/all", data
             )
 
             services = response.get("value", [])
@@ -2419,14 +2422,13 @@ class CheckmkClient:
             }
             if host_filter:
                 basic_data["host_name"] = host_filter
-                response = self._make_request(
-                    "POST",
+                response = self._request_service_collection(
                     f"/objects/host/{host_filter}/collections/services",
-                    json=basic_data,
+                    basic_data,
                 )
             else:
-                response = self._make_request(
-                    "POST", "/domain-types/service/collections/all", json=basic_data
+                response = self._request_service_collection(
+                    "/domain-types/service/collections/all", basic_data
                 )
 
             all_services = response.get("value", [])
@@ -2471,8 +2473,8 @@ class CheckmkClient:
                     "scheduled_downtime_depth",
                 ]
             }
-            response = self._make_request(
-                "POST", "/domain-types/service/collections/all", json=basic_data
+            response = self._request_service_collection(
+                "/domain-types/service/collections/all", basic_data
             )
 
             all_services = response.get("value", [])
@@ -2510,8 +2512,8 @@ class CheckmkClient:
                     "scheduled_downtime_depth",
                 ]
             }
-            response = self._make_request(
-                "POST", "/domain-types/service/collections/all", json=basic_data
+            response = self._request_service_collection(
+                "/domain-types/service/collections/all", basic_data
             )
 
             all_services = response.get("value", [])
@@ -2875,6 +2877,12 @@ class CheckmkClient:
         return response
 
     # System Information operations
+
+    #: Minimum supported Checkmk version
+    MIN_CHECKMK_VERSION: Tuple[int, int, int] = (2, 2, 0)
+    #: REST API major versions accepted by this client (built against /api/1.0)
+    SUPPORTED_API_MAJORS: Tuple[int, ...] = (0, 1)
+
     def get_version_info(self) -> Dict[str, Any]:
         """
         Get Checkmk version information.
@@ -2888,6 +2896,126 @@ class CheckmkClient:
             f"Retrieved version info: {response.get('versions', {}).get('checkmk', 'unknown')}"
         )
         return response
+
+    @staticmethod
+    def parse_checkmk_version(version_string: str) -> Optional[Tuple[int, int, int]]:
+        """Parse a Checkmk version string like '2.4.0p1.cee' into (2, 4, 0).
+
+        Returns None if the string doesn't start with a recognizable
+        major.minor.patch version.
+        """
+        match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_string or "")
+        if not match:
+            return None
+        return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+    def check_version_compatibility(self) -> Dict[str, Any]:
+        """Check that the connected Checkmk server and its REST API are supported.
+
+        Returns a dict (never raises for version problems):
+            compatible: True (supported), False (unsupported),
+                        or None (could not be determined)
+            checkmk_version: raw version string from the server
+            api_revision: REST API revision string from the server
+            issues: list of human-readable problem descriptions
+        """
+        result: Dict[str, Any] = {
+            "compatible": True,
+            "checkmk_version": None,
+            "api_revision": None,
+            "issues": [],
+        }
+
+        try:
+            info = self.get_version_info()
+        except CheckmkAPIError as e:
+            result["compatible"] = None
+            result["issues"].append(
+                f"Could not determine Checkmk version (is the REST API "
+                f"enabled and reachable?): {e}"
+            )
+            return result
+
+        # Checkmk version check
+        version_string = info.get("versions", {}).get("checkmk", "")
+        result["checkmk_version"] = version_string
+        parsed = self.parse_checkmk_version(version_string)
+        min_version = ".".join(str(x) for x in self.MIN_CHECKMK_VERSION)
+        if parsed is None:
+            result["compatible"] = None
+            result["issues"].append(
+                f"Unrecognized Checkmk version format: '{version_string}' "
+                f"(minimum supported is {min_version})"
+            )
+        elif parsed < self.MIN_CHECKMK_VERSION:
+            result["compatible"] = False
+            result["issues"].append(
+                f"Checkmk {version_string} is not supported; "
+                f"minimum supported version is {min_version}"
+            )
+
+        # REST API revision check
+        api_revision = (info.get("rest_api") or {}).get("revision", "")
+        result["api_revision"] = api_revision
+        if api_revision:
+            major = api_revision.split(".")[0]
+            if major.isdigit() and int(major) not in self.SUPPORTED_API_MAJORS:
+                result["compatible"] = False
+                supported = ", ".join(str(m) for m in self.SUPPORTED_API_MAJORS)
+                result["issues"].append(
+                    f"Checkmk REST API revision {api_revision} is not "
+                    f"supported; this client accepts API major versions "
+                    f"{supported}"
+                )
+
+        return result
+
+    def _get_server_version(self) -> Optional[Tuple[int, int, int]]:
+        """Return the connected server's parsed version, cached per client.
+
+        Returns None if the version cannot be determined; callers should
+        then assume current (2.4) behavior.
+        """
+        if not self._server_version_checked:
+            self._server_version_checked = True
+            try:
+                info = self.get_version_info()
+                self._cached_server_version = self.parse_checkmk_version(
+                    info.get("versions", {}).get("checkmk", "")
+                )
+            except CheckmkAPIError as e:
+                self.logger.debug(f"Could not determine server version: {e}")
+                self._cached_server_version = None
+        return self._cached_server_version
+
+    def _request_service_collection(
+        self, endpoint: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Query a service collection endpoint in a version-appropriate way.
+
+        Checkmk 2.4 added POST variants of the service listing endpoints
+        (/domain-types/service/collections/all and
+        /objects/host/{host}/collections/services); on 2.2/2.3 they are
+        GET-only (see docs/checkmk-rest-openapi-2.2.yaml). For older servers
+        the request body is converted to query parameters: 'query' dicts are
+        JSON-encoded, and 'host_name' is dropped for the host-specific
+        endpoint since it is already in the URL path.
+        """
+        version = self._get_server_version()
+        if version is not None and version < (2, 4, 0):
+            import json
+
+            params: Dict[str, Any] = {}
+            for key, value in data.items():
+                if key == "host_name" and endpoint.startswith("/objects/host/"):
+                    continue  # host name is part of the URL path
+                if key == "query" and isinstance(value, (dict, list)):
+                    params[key] = json.dumps(value)
+                else:
+                    params[key] = value
+            return self._make_request("GET", endpoint, params=params)
+
+        return self._make_request("POST", endpoint, json=data)
 
     def test_connection(self) -> bool:
         """

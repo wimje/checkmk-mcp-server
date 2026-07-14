@@ -320,6 +320,29 @@ async def main():
         logger.info("Starting Checkmk MCP Server...")
         logger.info(f"Checkmk URL: {config.checkmk.server_url}")
         logger.info(f"Transport: {args.transport}")
+
+        # Verify the Checkmk server and REST API versions are supported
+        from checkmk_mcp_server.api_client import CheckmkClient
+
+        compat = CheckmkClient(config.checkmk).check_version_compatibility()
+        if compat["compatible"] is False:
+            for issue in compat["issues"]:
+                logger.error(issue)
+            logger.error(
+                "Unsupported Checkmk server -- refusing to start. "
+                "See docs/getting-started.md for supported versions."
+            )
+            sys.exit(1)
+        elif compat["compatible"] is None:
+            # Could not be determined (e.g. transient network problem or
+            # unusual version string) -- warn but keep starting.
+            for issue in compat["issues"]:
+                logger.warning(issue)
+        else:
+            logger.info(
+                f"Checkmk {compat['checkmk_version']} "
+                f"(REST API {compat['api_revision']}) -- supported"
+            )
         
          # Log advanced features only if enabled
         advanced_features = []

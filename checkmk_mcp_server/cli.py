@@ -83,6 +83,26 @@ def cli(ctx, log_level: str, config: Optional[str], request_id: Optional[str]):
         checkmk_client = CheckmkClient(app_config.checkmk)
         ctx.obj["checkmk_client"] = checkmk_client
 
+        # Verify the Checkmk server and REST API versions are supported.
+        # Fail cleanly (no traceback) on unsupported versions; if the check
+        # is inconclusive (e.g. network hiccup), warn and continue.
+        compat = checkmk_client.check_version_compatibility()
+        if compat["compatible"] is False:
+            import click
+            import sys
+
+            for issue in compat["issues"]:
+                click.echo(f"❌ {issue}", err=True)
+            click.echo(
+                "❌ Unsupported Checkmk server. See docs/getting-started.md "
+                "for supported versions.",
+                err=True,
+            )
+            sys.exit(1)
+        elif compat["compatible"] is None:
+            for issue in compat["issues"]:
+                logger.warning(issue)
+
         # Try to initialize LLM client
         try:
             from .llm_client import create_llm_client
