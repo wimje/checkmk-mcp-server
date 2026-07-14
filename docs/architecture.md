@@ -350,6 +350,22 @@ class ParameterHandlerRegistry:
 - **CLI Interface**: `checkmk_cli_mcp.py` - Testing and automation
 - **Legacy CLI**: Direct API access for debugging
 
+### Where the LLM Lives
+
+The two interfaces use fundamentally different intelligence:
+
+- **MCP path** (`mcp_checkmk_server.py` + Claude Desktop or another MCP
+  client): the LLM *is the MCP client*. Claude interprets natural language
+  and decides which of the server's tools to call. The server itself makes
+  no LLM calls, and the `llm:` configuration section is not used.
+- **MCP CLI** (`checkmk_cli_mcp.py`, including `interactive`): no LLM at
+  all. Natural-language input is handled by keyword-based intent matching
+  in `interactive/mcp_session.py`. It exists for testing the MCP server
+  and for scripted automation.
+- **Direct CLI** (`checkmk_mcp_server/cli.py`): the only component that
+  uses the `llm:` configuration (`anthropic_api_key`/`openai_api_key`),
+  for parsing natural-language commands via `llm_client.py`.
+
 ### Production Considerations
 - **Process Management**: Systemd/supervisord integration
 - **Logging**: Structured logging with log rotation

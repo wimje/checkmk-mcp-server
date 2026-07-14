@@ -88,7 +88,10 @@ checkmk:
   site: "mysite"
 
 llm:
-  # Optional: Add OpenAI or Anthropic API key for enhanced processing
+  # Optional -- only used by the DIRECT CLI (checkmk_mcp_server/cli.py) for
+  # natural-language command parsing. NOT used by the MCP server or the MCP
+  # CLI (checkmk_cli_mcp.py): in the MCP setup, the AI client (e.g. Claude
+  # Desktop) is the LLM, and the MCP CLI uses keyword matching only.
   # Option 1: OpenAI
   # openai_api_key: "sk-your-openai-api-key"
   # default_model: "gpt-3.5-turbo"
@@ -271,7 +274,10 @@ You should see Claude respond with information about the 37 available monitoring
 
 ### 4.3 Alternative: CLI Interface
 
-For testing or environments without MCP clients:
+For testing or environments without MCP clients. Note: the MCP CLI does not
+use an LLM — its interactive mode understands a fixed set of keyword
+patterns (e.g. "list all hosts"), not free-form natural language. Full
+natural-language interaction requires an AI client like Claude Desktop:
 
 ```bash
 # Interactive mode
